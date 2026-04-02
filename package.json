@@ -1,0 +1,36 @@
+{
+  "name": "gstack-design",
+  "version": "1.0.0",
+  "description": "AI-powered UI mockup CLI — generate, iterate, diff, and QA design mockups",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "design": "./dist/design"
+  },
+  "scripts": {
+    "build": "bun build --compile src/cli.ts --outfile dist/design",
+    "postbuild": "git rev-parse HEAD > dist/.version 2>/dev/null || echo 'unknown' > dist/.version",
+    "dev": "bun run src/cli.ts",
+    "test": "bun test test/",
+    "smoke": "bun test test/smoke.test.ts --timeout 60000",
+    "smoke:integration": "bun test test-integration/ --timeout 120000",
+    "typecheck": "bunx tsc --noEmit",
+    "setup": "bash setup"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "design",
+    "mockup",
+    "ui",
+    "openai",
+    "gpt-4o",
+    "image-generation",
+    "cli",
+    "ai-agent"
+  ]
+}

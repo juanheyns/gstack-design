@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# design setup — install and build the design CLI
+set -e
+
+# ─── Check Bun ───────────────────────────────────────────────────
+if ! command -v bun >/dev/null 2>&1; then
+  echo "Error: bun is required but not installed." >&2
+  echo "Install: curl -fsSL https://bun.sh/install | bash" >&2
+  exit 1
+fi
+
+BUN_VERSION_MAJOR=$(bun --version | cut -d. -f1)
+if [ "$BUN_VERSION_MAJOR" -lt 1 ]; then
+  echo "Error: bun >= 1.0.0 required (found $(bun --version))" >&2
+  exit 1
+fi
+
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+DIST_DIR="$REPO_DIR/dist"
+
+echo "Installing dependencies..."
+bun install
+
+# ─── Smart rebuild ───────────────────────────────────────────────
+DESIGN_BIN="$DIST_DIR/design"
+NEEDS_BUILD=0
+
+if [ ! -f "$DESIGN_BIN" ]; then
+  NEEDS_BUILD=1
+else
+  # Rebuild if any source file is newer than the binary
+  if find "$REPO_DIR/src" -name "*.ts" -newer "$DESIGN_BIN" | grep -q .; then
+    NEEDS_BUILD=1
+  fi
+fi
+
+if [ "$NEEDS_BUILD" -eq 1 ]; then
+  echo "Building design..."
+  mkdir -p "$DIST_DIR"
+  bun run build
+else
+  echo "Build is up to date (use 'bun run build' to force rebuild)"
+fi
+
+echo ""
+echo "design is ready."
+echo "Usage: $DESIGN_BIN <command>"
+echo "       design --help"
+echo ""
+echo "Run 'design setup' to configure your OpenAI API key."

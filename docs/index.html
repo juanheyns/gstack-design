@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>design — AI-powered UI mockup CLI</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --accent: #7c6af7;
+      --accent-dim: #3d3570;
+      --text: #e2e4f0;
+      --muted: #8b8fa8;
+      --code-bg: #12141e;
+      --green: #4ade80;
+      --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Layout ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+    }
+
+    header .logo {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    header nav a {
+      margin-left: 1.5rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    header nav a:hover { color: var(--text); text-decoration: none; }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 2rem 6rem;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 5rem 0 4rem;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 1rem;
+    }
+
+    .hero h1 span { color: var(--accent); }
+
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 560px;
+      margin: 0 auto 2.5rem;
+    }
+
+    .install-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 1rem;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.9rem 1.4rem;
+      font-family: var(--font-mono);
+      font-size: 0.95rem;
+    }
+
+    .install-box .prompt { color: var(--accent); user-select: none; }
+    .install-box .cmd { color: var(--text); }
+
+    .copy-btn {
+      background: var(--accent-dim);
+      border: none;
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 0.3rem 0.7rem;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: var(--accent); }
+    .copy-btn.copied { background: var(--green); color: #000; }
+
+    /* ── Sections ── */
+    section { margin-top: 4rem; }
+
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 2rem 0 0.75rem;
+    }
+
+    /* ── Code blocks ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.1rem 1.4rem;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 0.875rem;
+      line-height: 1.7;
+    }
+
+    pre .comment { color: var(--muted); }
+    pre .cmd { color: var(--green); }
+    pre .str { color: #f9c74f; }
+
+    /* ── Command table ── */
+    .cmd-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    .cmd-table th {
+      text-align: left;
+      padding: 0.5rem 1rem 0.5rem 0;
+      color: var(--muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cmd-table td {
+      padding: 0.45rem 1rem 0.45rem 0;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    .cmd-table td:first-child {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--accent);
+      white-space: nowrap;
+      padding-right: 1.5rem;
+    }
+
+    .cmd-table td:last-child { color: var(--muted); }
+
+    /* ── Badges ── */
+    .badges { display: flex; gap: 0.5rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap; }
+
+    .badge {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.25rem 0.8rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    /* ── Workflow diagram ── */
+    .workflow {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      line-height: 1.8;
+      color: var(--muted);
+      text-align: center;
+      margin: 1.5rem 0;
+    }
+
+    .workflow .step { color: var(--accent); font-weight: 600; }
+    .workflow .arrow { color: var(--green); }
+
+    /* ── Output tree ── */
+    .tree {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.1rem 1.4rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: var(--muted);
+    }
+
+    .tree .dir { color: var(--accent); }
+    .tree .file { color: var(--text); }
+    .tree .desc { color: var(--muted); }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 6rem;
+      border-top: 1px solid var(--border);
+      padding: 2rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">design</span>
+  <nav>
+    <a href="#install">Install</a>
+    <a href="#usage">Usage</a>
+    <a href="#commands">Commands</a>
+    <a href="#workflow">Workflow</a>
+    <a href="https://github.com/juanheyns/gstack-design">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1>AI-powered<br><span>UI mockup CLI</span></h1>
+    <p>Generate, iterate, diff, and QA production-quality UI mockups from the command line. Built on GPT-4o image generation.</p>
+
+    <div class="install-box">
+      <span class="prompt">$</span>
+      <span class="cmd" id="install-cmd">brew install juanheyns/gstack/design</span>
+      <button class="copy-btn" onclick="copyInstall(this)">copy</button>
+    </div>
+
+    <div class="install-box" style="margin-top: 0.75rem;">
+      <span class="prompt">$</span>
+      <span class="cmd" id="skill-cmd">npx skills add https://github.com/juanheyns/gstack-design --skill gstack-design</span>
+      <button class="copy-btn" onclick="copySkill(this)">copy</button>
+    </div>
+
+    <div class="badges">
+      <span class="badge">macOS · Linux · Windows</span>
+      <span class="badge">GPT-4o image generation</span>
+      <span class="badge">Zero dependencies</span>
+      <span class="badge">MIT license</span>
+    </div>
+  </div>
+
+  <!-- Install -->
+  <section id="install">
+    <h2>Installation</h2>
+
+    <h3>Homebrew (recommended)</h3>
+    <pre><span class="cmd">brew tap juanheyns/gstack
+brew install design
+design setup</span>   <span class="comment"># configure your OpenAI API key</span></pre>
+
+    <h3>Manual</h3>
+    <pre><span class="comment"># Download a release binary from GitHub and put it in your PATH</span>
+<span class="cmd">curl -L https://github.com/juanheyns/gstack-design/releases/latest/download/design-darwin-arm64.tar.gz | tar xz
+mv design /usr/local/bin/
+design setup</span></pre>
+
+    <h3>Build from source</h3>
+    <pre><span class="cmd">git clone https://github.com/juanheyns/gstack-design.git
+cd gstack-design
+./setup</span>              <span class="comment"># requires bun >= 1.0.0</span>
+<span class="cmd">dist/design --help</span></pre>
+
+    <h3>Claude Code skill (skills.sh)</h3>
+    <pre><span class="cmd">npx skills add https://github.com/juanheyns/gstack-design --skill gstack-design</span>
+<span class="comment"># Installs the design skill into your AI agent for use in any project.</span></pre>
+  </section>
+
+  <!-- Usage -->
+  <section id="usage">
+    <h2>Quick start</h2>
+
+    <h3>Generate a mockup</h3>
+    <pre><span class="cmd">design generate --brief <span class="str">"Dashboard with metrics cards and a sidebar"</span></span>
+<span class="comment"># Output: .design/mockup.png</span>
+
+<span class="cmd">design generate --brief <span class="str">"Landing page for a dev tool"</span> --check</span>
+<span class="comment"># Generate + auto-QA: verifies the mockup matches the brief</span></pre>
+
+    <h3>Explore variants</h3>
+    <pre><span class="cmd">design variants --brief <span class="str">"Settings page with toggles"</span> --count 3</span>
+<span class="comment"># Output: .design/variants/variant-A.png, variant-B.png, variant-C.png</span>
+
+<span class="cmd">design compare --images <span class="str">".design/variants/*.png"</span> --serve</span>
+<span class="comment"># Opens an interactive comparison board in your browser</span></pre>
+
+    <h3>Iterate on a design</h3>
+    <pre><span class="cmd">design iterate --session .design/variants/session.json \
+  --feedback <span class="str">"Make the header smaller, add more whitespace"</span></span>
+<span class="comment"># Multi-turn refinement with conversation threading</span></pre>
+
+    <h3>Evolve a live site</h3>
+    <pre><span class="comment"># Screenshot your current site (via browse or any tool)</span>
+<span class="cmd">browse goto https://example.com
+browse screenshot /tmp/current.png</span>
+
+<span class="comment"># Generate an evolved version</span>
+<span class="cmd">design evolve --screenshot /tmp/current.png \
+  --brief <span class="str">"simplify the header, add more whitespace"</span></span>
+
+<span class="comment"># Diff to see what changed</span>
+<span class="cmd">design diff --before /tmp/current.png --after .design/evolved.png</span></pre>
+
+    <h3>Design-to-code handoff</h3>
+    <pre><span class="cmd">design design-to-code --image .design/mockup.png</span>
+<span class="comment"># Returns: { implementationPrompt, colors, typography, layout, components }</span></pre>
+  </section>
+
+  <!-- Commands -->
+  <section id="commands">
+    <h2>Command reference</h2>
+
+    <h3>Generation</h3>
+    <table class="cmd-table">
+      <tr><td>design generate --brief "..."</td><td>Generate a mockup from a text brief</td></tr>
+      <tr><td>design generate --brief-file brief.json</td><td>Generate from a structured JSON brief</td></tr>
+      <tr><td>design generate --brief "..." --check</td><td>Generate + auto-QA the result</td></tr>
+      <tr><td>design variants --brief "..." --count 3</td><td>Generate N variant explorations</td></tr>
+      <tr><td>design iterate --session ... --feedback "..."</td><td>Refine a mockup with feedback</td></tr>
+    </table>
+
+    <h3>Quality & comparison</h3>
+    <table class="cmd-table">
+      <tr><td>design check --image ... --brief "..."</td><td>Vision QA — does mockup match brief?</td></tr>
+      <tr><td>design compare --images "*.png"</td><td>HTML comparison board</td></tr>
+      <tr><td>design compare --images "*.png" --serve</td><td>Comparison board + live feedback server</td></tr>
+      <tr><td>design diff --before a.png --after b.png</td><td>Visual diff between two mockups</td></tr>
+      <tr><td>design verify --mockup ... --screenshot ...</td><td>Verify implementation against mockup</td></tr>
+    </table>
+
+    <h3>Design evolution</h3>
+    <table class="cmd-table">
+      <tr><td>design evolve --screenshot ... --brief "..."</td><td>Evolve a live screenshot into a new design</td></tr>
+      <tr><td>design design-to-code --image ...</td><td>Extract implementation prompt from mockup</td></tr>
+      <tr><td>design extract --image ...</td><td>Extract design language into DESIGN.md</td></tr>
+    </table>
+
+    <h3>Gallery & server</h3>
+    <table class="cmd-table">
+      <tr><td>design gallery</td><td>HTML timeline of all design explorations</td></tr>
+      <tr><td>design serve --html board.html</td><td>Serve comparison board with feedback loop</td></tr>
+      <tr><td>design setup</td><td>Configure OpenAI API key</td></tr>
+      <tr><td>design --version</td><td>Print version</td></tr>
+    </table>
+  </section>
+
+  <!-- Workflow -->
+  <section id="workflow">
+    <h2>Agent workflow</h2>
+
+    <p style="color:var(--muted);margin-bottom:1.5rem">
+      Every command outputs structured JSON to stdout and logs to stderr, making design ideal for AI agent automation.
+    </p>
+
+    <div class="workflow">
+      <span class="step">generate</span> <span class="arrow">→</span>
+      <span class="step">check</span> <span class="arrow">→</span>
+      <span class="step">iterate</span> <span class="arrow">→</span>
+      <span class="step">compare</span> <span class="arrow">→</span>
+      <span class="step">design-to-code</span> <span class="arrow">→</span>
+      <span class="step">implement</span>
+    </div>
+
+    <h3>Project directory</h3>
+    <p style="color:var(--muted);margin-bottom:1rem">
+      All output defaults to <code style="background:var(--code-bg);padding:0.1rem 0.4rem;border-radius:4px">.design/</code>
+      in the current git project root. Auto-created on first use, auto-added to <code style="background:var(--code-bg);padding:0.1rem 0.4rem;border-radius:4px">.gitignore</code>.
+    </p>
+
+    <div class="tree">
+      <span class="dir">.design/</span><br>
+      <span class="file">&nbsp;&nbsp;mockup.png</span> <span class="desc">— latest generate output</span><br>
+      <span class="dir">&nbsp;&nbsp;variants/</span><br>
+      <span class="file">&nbsp;&nbsp;&nbsp;&nbsp;variant-A.png</span><br>
+      <span class="file">&nbsp;&nbsp;&nbsp;&nbsp;variant-B.png</span><br>
+      <span class="file">&nbsp;&nbsp;&nbsp;&nbsp;variant-C.png</span><br>
+      <span class="file">&nbsp;&nbsp;board.html</span> <span class="desc">— comparison board</span><br>
+      <span class="file">&nbsp;&nbsp;iterate.png</span> <span class="desc">— latest iteration</span><br>
+      <span class="file">&nbsp;&nbsp;evolved.png</span> <span class="desc">— latest evolve output</span><br>
+      <span class="file">&nbsp;&nbsp;gallery.html</span> <span class="desc">— design history timeline</span>
+    </div>
+
+    <h3>Structured brief format</h3>
+    <pre><span class="comment">// brief.json — for --brief-file</span>
+{
+  <span class="str">"goal"</span>: <span class="str">"Dashboard for coding assessment tool"</span>,
+  <span class="str">"audience"</span>: <span class="str">"Technical users, hiring managers"</span>,
+  <span class="str">"style"</span>: <span class="str">"Dark theme, cream accents, minimal"</span>,
+  <span class="str">"elements"</span>: [<span class="str">"score badge"</span>, <span class="str">"narrative letter"</span>, <span class="str">"metric cards"</span>],
+  <span class="str">"screenType"</span>: <span class="str">"desktop-dashboard"</span>
+}</pre>
+
+    <h3>Configuration</h3>
+    <pre><span class="cmd">design setup</span>                    <span class="comment"># interactive API key setup</span>
+<span class="cmd">export OPENAI_API_KEY=sk-...</span>    <span class="comment"># or set via environment variable</span>
+<span class="comment"># Config stored at ~/.config/design/config.json</span>
+<span class="comment"># Also reads ~/.gstack/openai.json as fallback for gstack users</span></pre>
+  </section>
+
+</main>
+
+<footer>
+  <a href="https://github.com/juanheyns/gstack-design">github.com/juanheyns/gstack-design</a>
+  &nbsp;·&nbsp; MIT license
+  <br><br>
+  <span style="font-size:0.8rem">Based on <a href="https://github.com/garrytan/gstack">gstack</a> by <a href="https://github.com/garrytan">Garry Tan</a></span>
+</footer>
+
+<script>
+  function copyText(id, btn) {
+    const text = document.getElementById(id).textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+    });
+  }
+  function copyInstall(btn) { copyText('install-cmd', btn); }
+  function copySkill(btn) { copyText('skill-cmd', btn); }
+</script>
+
+</body>
+</html>

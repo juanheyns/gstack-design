@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            target: darwin-arm64
+            output: design-darwin-arm64
+          - runner: macos-13
+            target: darwin-x86_64
+            output: design-darwin-x86_64
+          - runner: ubuntu-latest
+            target: linux-x86_64
+            output: design-linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+            output: design-linux-arm64
+          - runner: windows-latest
+            target: windows-x86_64
+            output: design-windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+
+      - name: Package (non-Windows)
+        if: matrix.runner != 'windows-latest'
+        run: |
+          cd dist
+          tar czf ../${{ matrix.output }}.tar.gz design
+
+      - name: Package (Windows)
+        if: matrix.runner == 'windows-latest'
+        shell: bash
+        run: |
+          cd dist
+          tar czf ../${{ matrix.output }}.tar.gz design.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}.tar.gz
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Extract version tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            design-darwin-arm64.tar.gz \
+            design-darwin-x86_64.tar.gz \
+            design-linux-x86_64.tar.gz \
+            design-linux-arm64.tar.gz \
+            design-windows-x86_64.tar.gz \
+            --generate-notes \
+            --title "design v$VERSION"
+
+      - name: Compute SHA256 checksums
+        run: |
+          for f in design-darwin-arm64.tar.gz design-darwin-x86_64.tar.gz design-linux-x86_64.tar.gz design-linux-arm64.tar.gz; do
+            sha256sum "$f" | awk '{print $1}' > "${f%.tar.gz}.sha256"
+          done
+
+      - name: Clone tap repo
+        run: |
+          git clone https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/juanheyns/homebrew-gstack.git tap
+
+      - name: Update design.rb
+        run: |
+          VERSION="${{ env.VERSION }}"
+          SHA_DARWIN_ARM=$(cat design-darwin-arm64.sha256)
+          SHA_DARWIN_X86=$(cat design-darwin-x86_64.sha256)
+          SHA_LINUX_X86=$(cat design-linux-x86_64.sha256)
+          SHA_LINUX_ARM=$(cat design-linux-arm64.sha256)
+          sed -i "s|version \".*\"|version \"${VERSION}\"|g" tap/Formula/design.rb
+          sed -i "/darwin.*arm/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-darwin-arm64.tar.gz\"|}" tap/Formula/design.rb
+          sed -i "/darwin.*arm/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_DARWIN_ARM}\"|}" tap/Formula/design.rb
+          sed -i "/darwin.*intel/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-darwin-x86_64.tar.gz\"|}" tap/Formula/design.rb
+          sed -i "/darwin.*intel/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_DARWIN_X86}\"|}" tap/Formula/design.rb
+          sed -i "/linux.*intel/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-linux-x86_64.tar.gz\"|}" tap/Formula/design.rb
+          sed -i "/linux.*intel/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_LINUX_X86}\"|}" tap/Formula/design.rb
+          sed -i "/linux.*arm/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-linux-arm64.tar.gz\"|}" tap/Formula/design.rb
+          sed -i "/linux.*arm/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_LINUX_ARM}\"|}" tap/Formula/design.rb
+
+      - name: Commit and push formula update
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/design.rb
+          git commit -m "design ${{ env.VERSION }}"
+          git push

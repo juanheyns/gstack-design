@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.design/
+*.tar.gz
+*.sha256
+bun.lockb
+.browse/
