@@ -9,7 +9,6 @@
   },
   "scripts": {
     "build": "bun build --compile src/cli.ts --outfile dist/design",
-    "postbuild": "git rev-parse HEAD > dist/.version 2>/dev/null || echo 'unknown' > dist/.version",
     "dev": "bun run src/cli.ts",
     "test": "bun test test/",
     "smoke": "bun test test/smoke.test.ts --timeout 60000",

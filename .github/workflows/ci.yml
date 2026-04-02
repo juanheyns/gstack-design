@@ -41,3 +41,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: bun run build
+      - name: Write version file (non-Windows)
+        if: matrix.os != 'windows-latest'
+        run: git rev-parse HEAD > dist/.version
+      - name: Write version file (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: git rev-parse HEAD | Out-File -FilePath dist/.version -Encoding ascii -NoNewline
