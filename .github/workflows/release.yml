@@ -128,14 +128,14 @@ jobs:
           SHA_LINUX_X86=$(cat design-linux-x86_64.sha256)
           SHA_LINUX_ARM=$(cat design-linux-arm64.sha256)
           sed -i "s|version \".*\"|version \"${VERSION}\"|g" tap/Formula/design.rb
-          sed -i "/darwin.*arm/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-darwin-arm64.tar.gz\"|}" tap/Formula/design.rb
-          sed -i "/darwin.*arm/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_DARWIN_ARM}\"|}" tap/Formula/design.rb
-          sed -i "/darwin.*intel/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-darwin-x86_64.tar.gz\"|}" tap/Formula/design.rb
-          sed -i "/darwin.*intel/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_DARWIN_X86}\"|}" tap/Formula/design.rb
-          sed -i "/linux.*intel/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-linux-x86_64.tar.gz\"|}" tap/Formula/design.rb
-          sed -i "/linux.*intel/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_LINUX_X86}\"|}" tap/Formula/design.rb
-          sed -i "/linux.*arm/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-linux-arm64.tar.gz\"|}" tap/Formula/design.rb
-          sed -i "/linux.*arm/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_LINUX_ARM}\"|}" tap/Formula/design.rb
+          sed -i "/darwin-arm64/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-darwin-arm64.tar.gz\"|}" tap/Formula/design.rb
+          sed -i "/darwin-arm64/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_DARWIN_ARM}\"|}" tap/Formula/design.rb
+          sed -i "/darwin-x86_64/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-darwin-x86_64.tar.gz\"|}" tap/Formula/design.rb
+          sed -i "/darwin-x86_64/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_DARWIN_X86}\"|}" tap/Formula/design.rb
+          sed -i "/linux-x86_64/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-linux-x86_64.tar.gz\"|}" tap/Formula/design.rb
+          sed -i "/linux-x86_64/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_LINUX_X86}\"|}" tap/Formula/design.rb
+          sed -i "/linux-arm64/,/sha256/{s|url \".*\"|url \"https://github.com/juanheyns/gstack-design/releases/download/v${VERSION}/design-linux-arm64.tar.gz\"|}" tap/Formula/design.rb
+          sed -i "/linux-arm64/,/sha256/{s|sha256 \".*\"|sha256 \"${SHA_LINUX_ARM}\"|}" tap/Formula/design.rb
 
       - name: Commit and push formula update
         run: |
