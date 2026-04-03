@@ -1,5 +1,5 @@
 ---
-name: design
+name: gstack-design
 description: AI-powered UI mockup generation — generate, iterate, diff, QA, and evolve mockups via GPT-4o
 version: 1.0.0
 allowed-tools:
