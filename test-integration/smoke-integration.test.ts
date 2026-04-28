@@ -31,7 +31,7 @@ const hasBrowse = browseBin !== null;
 
 if (!hasBrowse) {
   console.log('SKIP: browse binary not found on PATH — integration smoke tests require both design and browse.');
-  console.log('Install browse: brew tap juanheyns/gstack && brew install browse');
+  console.log('Install browse: brew install juanheyns/tap/browse');
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────

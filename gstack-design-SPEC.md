@@ -26,7 +26,7 @@ This document is the complete implementation specification for extracting the `d
 14. [CI Workflow: ci.yml](#14-ci-workflow-ciyml)
 15. [CI Workflow: release.yml](#15-ci-workflow-releaseyml)
 16. [Homebrew Formulae](#16-homebrew-formulae)
-17. [Tap Repository: juanheyns/homebrew-gstack-design](#17-tap-repository-juanheynshomebrew-gstack-design)
+17. [Tap Repository: juanheyns/homebrew-tap](#17-tap-repository-juanheynshomebrew-tap)
 18. [SKILL.md](#18-skillmd)
 19. [README.md](#19-readmemd)
 20. [.gitignore](#20-gitignore)
@@ -1007,7 +1007,7 @@ jobs:
 
       - name: Clone tap repo
         run: |
-          git clone https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/juanheyns/homebrew-gstack-design.git tap
+          git clone https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/juanheyns/homebrew-tap.git tap
 
       - name: Update design.rb
         run: |
@@ -1037,13 +1037,13 @@ jobs:
 ```
 
 **Required GitHub secrets** in `juanheyns/gstack-design`:
-- `HOMEBREW_TAP_TOKEN` — a GitHub personal access token with `repo` scope for `juanheyns/homebrew-gstack-design`.
+- `HOMEBREW_TAP_TOKEN` — a GitHub personal access token with `repo` scope for `juanheyns/homebrew-tap`.
 
 ---
 
 ## 16. Homebrew Formulae
 
-These formulae live in the tap repo `juanheyns/homebrew-gstack-design` (§17), and are also kept as `Formula/design.rb` in the main repo for reference.
+These formulae live in the tap repo `juanheyns/homebrew-tap` (§17), and are also kept as `Formula/design.rb` in the main repo for reference.
 
 ### 16.1 `Formula/design.rb`
 
@@ -1088,37 +1088,37 @@ end
 
 ---
 
-## 17. Tap Repository: juanheyns/homebrew-gstack-design
+## 17. Tap Repository: juanheyns/homebrew-tap
 
-Create a separate GitHub repo `juanheyns/homebrew-gstack-design`:
+Create a separate GitHub repo `juanheyns/homebrew-tap`:
 
 ```bash
-gh repo create juanheyns/homebrew-gstack-design --public \
-  --description "Homebrew tap for juanheyns/gstack-design (AI mockup CLI)"
-git clone git@github.com:juanheyns/homebrew-gstack-design.git
+gh repo create juanheyns/homebrew-tap --public \
+  --description "Homebrew tap for juanheyns CLI tools"
+git clone git@github.com:juanheyns/homebrew-tap.git
 ```
 
 Structure:
 
 ```
-homebrew-gstack-design/
+homebrew-tap/
   Formula/
     design.rb         (copy from main repo, with real SHAs after first release)
+    ...               (other formulas: agent-aws, atmux, browse, browse-agent)
   README.md
 ```
 
 `README.md` content for the tap repo:
 
 ```markdown
-# homebrew-gstack-design
+# homebrew-tap
 
-Homebrew tap for [design](https://github.com/juanheyns/gstack-design) — AI-powered UI mockup CLI.
+Homebrew tap for juanheyns CLI tools — including [design](https://github.com/juanheyns/gstack-design).
 
 ## Install
 
 ```bash
-brew tap juanheyns/gstack-design
-brew install design
+brew install juanheyns/tap/design
 ```
 
 ## Upgrade
@@ -1292,8 +1292,7 @@ AI-powered UI mockup CLI built on GPT-4o. Generate, iterate, diff, and QA produc
 ## Install
 
 ```bash
-brew tap juanheyns/gstack-design
-brew install design
+brew install juanheyns/tap/design
 ```
 
 ## Quick start
@@ -1418,7 +1417,7 @@ Work through these steps in sequence. Each step has a clear completion criterion
 
 19. **Write `.gitignore`** — Content from §20. Done when: file exists.
 
-20. **Create `juanheyns/homebrew-gstack-design` tap repo** — `gh repo create`, clone, add formula stub, push. Done when: `brew tap juanheyns/gstack-design` succeeds.
+20. **Create `juanheyns/homebrew-tap` tap repo** — `gh repo create`, clone, add formula stub, push. Done when: `brew install juanheyns/tap/design` succeeds.
 
 21. **Add `Formula/design.rb`** to main repo — Stub content from §16 (SHAs are PLACEHOLDER until first release). Done when: file exists.
 
@@ -1437,13 +1436,12 @@ Work through these steps in sequence. Each step has a clear completion criterion
     ```
     Done when: Release workflow completes, GitHub release page shows all 5 tarballs.
 
-27. **Verify tap auto-update** — Done when: `tap/Formula/design.rb` in `juanheyns/homebrew-gstack-design` shows the v1.0.0 URLs with real SHA256 hashes.
+27. **Verify tap auto-update** — Done when: `tap/Formula/design.rb` in `juanheyns/homebrew-tap` shows the v1.0.0 URLs with real SHA256 hashes.
 
 28. **End-to-end test**:
     ```bash
     mkdir /tmp/design-e2e-test && cd /tmp/design-e2e-test && git init
-    brew tap juanheyns/gstack-design
-    brew install design
+    brew install juanheyns/tap/design
     design --version
     design setup
     design generate --brief "Simple landing page"
@@ -1475,7 +1473,7 @@ After completing the implementation order, verify each item:
 - [ ] `Formula/design.rb` has correct Ruby syntax: `ruby -c Formula/design.rb`
 - [ ] GitHub Actions CI workflow passes on PR to `main`
 - [ ] Release workflow produces all 5 tarballs on `v1.0.0` tag push
-- [ ] `brew tap juanheyns/gstack-design && brew install design` completes without error
+- [ ] `brew install juanheyns/tap/design` completes without error
 - [ ] `~/.config/design/config.json` is created (not `~/.gstack/openai.json`) after `design setup`
 - [ ] With only `~/.gstack/openai.json` present (no standalone config), `design generate` still resolves the API key
 - [ ] `feedback-roundtrip.test.ts` was NOT copied (it depends on the browse binary)

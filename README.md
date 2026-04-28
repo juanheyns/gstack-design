@@ -5,8 +5,7 @@ AI-powered UI mockup CLI built on GPT-4o. Generate, iterate, diff, and QA produc
 ## Install
 
 ```bash
-brew tap juanheyns/gstack
-brew install design
+brew install juanheyns/tap/design
 ```
 
 ## Quick start

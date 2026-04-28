@@ -118,7 +118,7 @@ jobs:
 
       - name: Clone tap repo
         run: |
-          git clone https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/juanheyns/homebrew-gstack.git tap
+          git clone https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/juanheyns/homebrew-tap.git tap
 
       - name: Update design.rb
         run: |
