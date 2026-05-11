@@ -1,6 +1,6 @@
 ---
 name: design
-description: AI-powered UI mockup generation — generate, iterate, diff, QA, and evolve mockups via GPT-4o
+description: AI-powered UI mockup generation — generate, iterate, diff, QA, and evolve mockups from the command line
 version: 1.0.0
 allowed-tools:
   - Bash
@@ -11,9 +11,9 @@ allowed-tools:
 
 # design
 
-AI-powered UI mockup CLI built on GPT-4o image generation. Generates production-quality PNG mockups, not wireframes. Supports multi-turn iteration, visual QA, visual diff, and design-to-code prompt extraction.
+AI-powered UI mockup CLI for production-style design workflows. Generates production-quality PNG mockups, not wireframes. Supports multi-turn iteration, visual QA, visual diff, implementation prompt extraction, and design-language extraction.
 
-Requires an OpenAI API key. Run `design setup` to configure.
+The CLI routes model-backed commands through `codex exec`. See [docs/codex-backend.md](../../docs/codex-backend.md).
 
 ## Commands
 
@@ -30,10 +30,12 @@ Requires an OpenAI API key. Run `design setup` to configure.
 | `design compare --images "/path/*.png" --output /path/board.html --serve` | Comparison board + live feedback server |
 | `design diff --before /path/a.png --after /path/b.png` | Visual diff between two mockups |
 | `design evolve --screenshot /path/live.png --brief "..." --output /path.png` | Evolve a live screenshot into a new design |
-| `design design-to-code --image /path.png` | Extract implementation prompt from mockup |
+| `design prompt --image /path.png` | Extract implementation prompt from mockup |
+| `design extract --image /path.png` | Extract design language into `DESIGN.md` |
+| `design verify --mockup /path.png --screenshot /path.png` | Verify live implementation against approved mockup |
 | `design gallery --output /path/gallery.html` | HTML timeline of all design explorations |
 | `design serve --html /path/board.html` | Serve a comparison board with feedback loop |
-| `design setup` | Configure OpenAI API key |
+| `design setup` | Verify Codex login + run smoke test |
 | `design --version` | Print version |
 
 ## Structured Brief Format
@@ -82,14 +84,14 @@ design evolve --screenshot /tmp/current.png --brief "simplify the header, add mo
 design diff --before /tmp/current.png --after /tmp/evolved.png
 ```
 
-### Design-to-code handoff
+### Prompt handoff
 
 ```bash
 # Generate the mockup
 design generate --brief "Settings page with profile section and notification toggles" --output /tmp/settings.png --check
 
 # Extract implementation instructions
-design design-to-code --image /tmp/settings.png
+design prompt --image /tmp/settings.png
 # Returns: { implementationPrompt, colors, typography, layout, components }
 ```
 
@@ -98,8 +100,8 @@ design design-to-code --image /tmp/settings.png
 ```bash
 # After approving a mockup, extract its design language into DESIGN.md
 # (This is done automatically by the memory module when invoked from a skill,
-# or manually via the design-to-code command)
-design design-to-code --image /tmp/approved.png
+# or manually via the extract command)
+design extract --image /tmp/approved.png
 ```
 
 Future `generate` calls in the same repo will read `DESIGN.md` as a constraint, keeping new mockups on-brand.
@@ -128,11 +130,22 @@ Multi-turn session state (API threading IDs) lives in `/tmp/design-session-*.jso
 ## Configuration
 
 ```bash
-design setup                    # Interactive API key setup
-export OPENAI_API_KEY=sk-...    # Or set via environment variable
+codex login
+design setup                    # Verify Codex login + run smoke test
 ```
 
-Config stored at `~/.config/design/config.json`. Also reads `~/.gstack/openai.json` as a fallback for existing gstack users.
+Model-backed commands run through `codex exec`.
+
+## Backend
+
+The backend architecture is:
+
+- keep `design` as the stable CLI surface
+- route model-backed work through `codex exec`
+- tell Codex exactly which output files to write
+- continue using local HTML review flows and `.design/` artifact management
+
+Details live in [docs/codex-backend.md](../../docs/codex-backend.md).
 
 ## Note for existing gstack users
 

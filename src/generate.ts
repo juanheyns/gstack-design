@@ -1,11 +1,14 @@
 /**
- * Generate UI mockups via OpenAI Responses API with image_generation tool.
+ * Generate UI mockups via Codex.
  */
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey } from "./auth";
+import { requireCodexAuth } from "./auth";
 import { parseBrief } from "./brief";
+import { imageModelGuardrails, runCodexJson } from "./codex";
+import { buildImageTaskSchema, type ImageTaskResponse, validateGeneratedPng, validateImageTaskResponse } from "./image-task";
+import { resolveLogPath } from "./project-dir";
 import { createSession, sessionPath } from "./session";
 import { checkMockup } from "./check";
 
@@ -23,75 +26,42 @@ export interface GenerateResult {
   outputPath: string;
   sessionFile: string;
   responseId: string;
+  logPath: string;
+  codexStatus: ImageTaskResponse;
   checkResult?: { pass: boolean; issues: string };
 }
 
-/**
- * Call OpenAI Responses API with image_generation tool.
- * Returns the response ID and base64 image data.
- */
-async function callImageGeneration(
-  apiKey: string,
+function buildGenerationPrompt(
   prompt: string,
+  outputPath: string,
   size: string,
   quality: string,
-): Promise<{ responseId: string; imageData: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        input: prompt,
-        tools: [{
-          type: "image_generation",
-          size,
-          quality,
-        }],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API error (${response.status}): ${error}`);
-    }
-
-    const data = await response.json() as any;
-
-    const imageItem = data.output?.find((item: any) =>
-      item.type === "image_generation_call"
-    );
-
-    if (!imageItem?.result) {
-      throw new Error(
-        `No image data in response. Output types: ${data.output?.map((o: any) => o.type).join(", ") || "none"}`
-      );
-    }
-
-    return {
-      responseId: data.id,
-      imageData: imageItem.result,
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
+): string {
+  return [
+    "Create a production-quality UI mockup from the brief below.",
+    ...imageModelGuardrails(outputPath, size, quality),
+    "",
+    "Design brief:",
+    prompt,
+    "",
+    "Requirements:",
+    "- The result must look like a real, polished product UI rather than concept art.",
+    "- Do not rename the file or substitute another format.",
+    '- Return JSON only.',
+    '- If you successfully create and write the PNG, return: {"status":"ok","writtenFiles":["absolute-path"],"generationMethod":"native_image_generation","notes":""}.',
+    '- If native image generation or direct file writing is unavailable, return: {"status":"unavailable","writtenFiles":[],"generationMethod":"unavailable","notes":"explain why"}.',
+    '- Do not claim success if the file was not actually written.',
+  ].join("\n");
 }
 
 /**
  * Generate a single mockup from a brief.
  */
 export async function generate(options: GenerateOptions): Promise<GenerateResult> {
-  const apiKey = requireApiKey();
+  requireCodexAuth();
 
   // Parse the brief
-  const prompt = options.briefFile
+  const basePrompt = options.briefFile
     ? parseBrief(options.briefFile, true)
     : parseBrief(options.brief!, false);
 
@@ -100,37 +70,47 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   const maxRetries = options.retry ?? 0;
 
   let lastResult: GenerateResult | null = null;
+  let currentPrompt = basePrompt;
+  const logPath = resolveLogPath("generate");
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
       console.error(`Retry ${attempt}/${maxRetries}...`);
     }
 
-    // Generate the image
     const startTime = Date.now();
-    const { responseId, imageData } = await callImageGeneration(apiKey, prompt, size, quality);
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    // Write to disk
     const outputDir = path.dirname(options.output);
     fs.mkdirSync(outputDir, { recursive: true });
-    const imageBuffer = Buffer.from(imageData, "base64");
-    fs.writeFileSync(options.output, imageBuffer);
+
+    const codexStatus = await runCodexJson<ImageTaskResponse>({
+      prompt: buildGenerationPrompt(currentPrompt, options.output, size, quality),
+      logPath,
+      outputSchema: buildImageTaskSchema(1),
+      writablePaths: [options.output],
+      timeoutMs: 5 * 60_000,
+    });
+
+    validateImageTaskResponse(codexStatus, [options.output]);
+    const imageInfo = validateGeneratedPng(options.output, size);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
     // Create session
-    const session = createSession(responseId, prompt, options.output);
+    const responseId = `codex-${Date.now()}`;
+    const session = createSession(responseId, basePrompt, options.output);
 
-    console.error(`Generated (${elapsed}s, ${(imageBuffer.length / 1024).toFixed(0)}KB) → ${options.output}`);
+    console.error(`Generated (${elapsed}s, ${(imageInfo.bytes / 1024).toFixed(0)}KB, ${imageInfo.width}x${imageInfo.height}) → ${options.output}`);
 
     lastResult = {
       outputPath: options.output,
       sessionFile: sessionPath(session.id),
       responseId,
+      logPath,
+      codexStatus,
     };
 
     // Quality check if requested
     if (options.check) {
-      const checkResult = await checkMockup(options.output, prompt);
+      const checkResult = await checkMockup(options.output, basePrompt);
       lastResult.checkResult = checkResult;
 
       if (checkResult.pass) {
@@ -140,6 +120,12 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
         console.error(`Quality check: FAIL — ${checkResult.issues}`);
         if (attempt < maxRetries) {
           console.error("Will retry...");
+          currentPrompt = [
+            basePrompt,
+            "",
+            "The previous attempt failed quality review.",
+            `Address these issues in the next attempt: ${checkResult.issues}`,
+          ].join("\n");
         }
       }
     } else {

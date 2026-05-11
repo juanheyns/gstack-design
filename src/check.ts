@@ -1,85 +1,61 @@
 /**
  * Vision-based quality gate for generated mockups.
- * Uses GPT-4o vision to verify text readability, layout completeness, and visual coherence.
+ * Uses Codex to verify text readability, layout completeness, and visual coherence.
  */
 
-import fs from "fs";
-import { requireApiKey } from "./auth";
+import { requireCodexAuth } from "./auth";
+import { runCodexJson } from "./codex";
+import { resolveLogPath } from "./project-dir";
 
 export interface CheckResult {
   pass: boolean;
   issues: string;
+  logPath?: string;
 }
+
+const CHECK_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    pass: { type: "boolean" },
+    issues: { type: "string" },
+  },
+  required: ["pass", "issues"],
+};
 
 /**
  * Check a generated mockup against the original brief.
  */
 export async function checkMockup(imagePath: string, brief: string): Promise<CheckResult> {
-  const apiKey = requireApiKey();
-  const imageData = fs.readFileSync(imagePath).toString("base64");
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
+  requireCodexAuth();
+  const logPath = resolveLogPath("check");
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${imageData}` },
-            },
-            {
-              type: "text",
-              text: [
-                "You are a UI quality checker. Evaluate this mockup against the design brief.",
-                "",
-                `Brief: ${brief}`,
-                "",
-                "Check these 3 things:",
-                "1. TEXT READABILITY: Are all labels, headings, and body text legible? Any misspellings?",
-                "2. LAYOUT COMPLETENESS: Are all requested elements present? Anything missing?",
-                "3. VISUAL COHERENCE: Does it look like a real production UI, not AI art or a collage?",
-                "",
-                "Respond with exactly one line:",
-                "PASS — if all 3 checks pass",
-                "FAIL: [list specific issues] — if any check fails",
-              ].join("\n"),
-            },
-          ],
-        }],
-        max_tokens: 200,
-      }),
-      signal: controller.signal,
+    const result = await runCodexJson<CheckResult>({
+      images: [imagePath],
+      logPath,
+      outputSchema: CHECK_SCHEMA,
+      timeoutMs: 90_000,
+      prompt: [
+        "You are a UI quality checker.",
+        "Evaluate the attached mockup against the design brief and respond with JSON only.",
+        "",
+        `Brief: ${brief}`,
+        "",
+        "Check these three things:",
+        "1. Text readability: Are labels, headings, and body text legible and spelled correctly?",
+        "2. Layout completeness: Are all requested elements present?",
+        "3. Visual coherence: Does it look like a real production UI rather than AI art or a collage?",
+        "",
+        "Set `pass` to true only if all three checks pass.",
+        "If anything fails, set `pass` to false and put specific issues in `issues`.",
+        "If everything passes, set `issues` to an empty string.",
+      ].join("\n"),
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      // Non-blocking: if vision check fails, default to PASS with warning
-      console.error(`Vision check API error (${response.status}): ${error}`);
-      return { pass: true, issues: "Vision check unavailable — skipped" };
-    }
-
-    const data = await response.json() as any;
-    const content = data.choices?.[0]?.message?.content?.trim() || "";
-
-    if (content.startsWith("PASS")) {
-      return { pass: true, issues: "" };
-    }
-
-    // Extract issues after "FAIL:"
-    const issues = content.replace(/^FAIL:\s*/i, "").trim();
-    return { pass: false, issues: issues || content };
-  } finally {
-    clearTimeout(timeout);
+    return { ...result, logPath };
+  } catch (error: any) {
+    console.error(`Vision check failed: ${error.message}`);
+    return { pass: true, issues: "Vision check unavailable — skipped", logPath };
   }
 }
 

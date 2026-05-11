@@ -1,13 +1,14 @@
 /**
- * Generate N design variants from a brief.
- * Uses staggered parallel: 1s delay between API calls to avoid rate limits.
- * Falls back to exponential backoff on 429s.
+ * Generate N design variants from a brief using Codex.
  */
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey } from "./auth";
+import { requireCodexAuth } from "./auth";
 import { parseBrief } from "./brief";
+import { imageModelGuardrails, runCodexJson } from "./codex";
+import { buildImageTaskSchema, type ImageTaskResponse, validateGeneratedPng, validateImageTaskResponse } from "./image-task";
+import { resolveLogPath } from "./project-dir";
 
 export interface VariantsOptions {
   brief?: string;
@@ -30,82 +31,10 @@ const STYLE_VARIATIONS = [
 ];
 
 /**
- * Generate a single variant with retry on 429.
- */
-async function generateVariant(
-  apiKey: string,
-  prompt: string,
-  outputPath: string,
-  size: string,
-  quality: string,
-): Promise<{ path: string; success: boolean; error?: string }> {
-  const maxRetries = 3;
-  let lastError = "";
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (attempt > 0) {
-      // Exponential backoff: 2s, 4s, 8s
-      const delay = Math.pow(2, attempt) * 1000;
-      console.error(`  Rate limited, retrying in ${delay / 1000}s...`);
-      await new Promise(r => setTimeout(r, delay));
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120_000);
-
-    try {
-      const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          input: prompt,
-          tools: [{ type: "image_generation", size, quality }],
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-
-      if (response.status === 429) {
-        lastError = "Rate limited (429)";
-        continue;
-      }
-
-      if (!response.ok) {
-        const error = await response.text();
-        return { path: outputPath, success: false, error: `API error (${response.status}): ${error.slice(0, 200)}` };
-      }
-
-      const data = await response.json() as any;
-      const imageItem = data.output?.find((item: any) => item.type === "image_generation_call");
-
-      if (!imageItem?.result) {
-        return { path: outputPath, success: false, error: "No image data in response" };
-      }
-
-      fs.writeFileSync(outputPath, Buffer.from(imageItem.result, "base64"));
-      return { path: outputPath, success: true };
-    } catch (err: any) {
-      clearTimeout(timeout);
-      if (err.name === "AbortError") {
-        return { path: outputPath, success: false, error: "Timeout (120s)" };
-      }
-      lastError = err.message;
-    }
-  }
-
-  return { path: outputPath, success: false, error: lastError };
-}
-
-/**
  * Generate N variants with staggered parallel execution.
  */
 export async function variants(options: VariantsOptions): Promise<void> {
-  const apiKey = requireApiKey();
+  requireCodexAuth();
   const baseBrief = options.briefFile
     ? parseBrief(options.briefFile, true)
     : parseBrief(options.brief!, false);
@@ -116,7 +45,7 @@ export async function variants(options: VariantsOptions): Promise<void> {
 
   // If viewports specified, generate responsive variants instead of style variants
   if (options.viewports) {
-    await generateResponsiveVariants(apiKey, baseBrief, options.outputDir, options.viewports, quality);
+    await generateResponsiveVariants(baseBrief, options.outputDir, options.viewports, quality);
     return;
   }
 
@@ -125,46 +54,62 @@ export async function variants(options: VariantsOptions): Promise<void> {
 
   console.error(`Generating ${count} variants...`);
   const startTime = Date.now();
+  const logPath = resolveLogPath("variants");
+  const specs = Array.from({ length: count }, (_, i) => {
+    const label = String.fromCharCode(65 + i);
+    return {
+      label,
+      path: path.join(options.outputDir, `variant-${label}.png`),
+      direction: STYLE_VARIATIONS[i] || "",
+    };
+  });
 
-  // Staggered parallel: start each call 1.5s apart
-  const promises: Promise<{ path: string; success: boolean; error?: string }>[] = [];
+  const codexStatus = await runCodexJson<ImageTaskResponse>({
+    prompt: [
+      "Create multiple distinct UI mockup variants from one brief.",
+      "",
+      `Base brief: ${baseBrief}`,
+      ...imageModelGuardrails(path.join(options.outputDir, "variant-A.png"), size, quality),
+      "",
+      "Write the final PNG files exactly to these paths:",
+      ...specs.map((spec) =>
+        `- ${path.resolve(spec.path)}${spec.direction ? ` — direction: ${spec.direction}` : " — direction: use the brief as-is"}`
+      ),
+      "",
+      "Each variant must be a meaningfully different visual direction for the same product brief.",
+      "Do not rename any files or skip any requested output.",
+      "Apply the native image-generation requirement to every requested variant file.",
+      '- Return JSON only.',
+      '- If you successfully create and write all requested PNGs, return: {"status":"ok","writtenFiles":["absolute-path-1","absolute-path-2"],"generationMethod":"native_image_generation","notes":""}.',
+      '- If native image generation or direct file writing is unavailable, return: {"status":"unavailable","writtenFiles":[],"generationMethod":"unavailable","notes":"explain why"}.',
+      '- Do not claim success if every requested file was not actually written.',
+    ].join("\n"),
+    logPath,
+    outputSchema: buildImageTaskSchema(specs.length),
+    writablePaths: specs.map((spec) => spec.path),
+    timeoutMs: 8 * 60_000,
+  });
 
-  for (let i = 0; i < count; i++) {
-    const variation = STYLE_VARIATIONS[i] || "";
-    const prompt = variation
-      ? `${baseBrief}\n\nStyle direction: ${variation}`
-      : baseBrief;
+  validateImageTaskResponse(codexStatus, specs.map((spec) => spec.path));
 
-    const outputPath = path.join(options.outputDir, `variant-${String.fromCharCode(65 + i)}.png`);
-
-    // Stagger: wait 1.5s between launches
-    const delay = i * 1500;
-    promises.push(
-      new Promise(resolve => setTimeout(resolve, delay))
-        .then(() => {
-          console.error(`  Starting variant ${String.fromCharCode(65 + i)}...`);
-          return generateVariant(apiKey, prompt, outputPath, size, quality);
-        })
-    );
-  }
-
-  const results = await Promise.allSettled(promises);
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
   const succeeded: string[] = [];
   const failed: string[] = [];
 
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value.success) {
-      const size = fs.statSync(result.value.path).size;
-      console.error(`  ✓ ${path.basename(result.value.path)} (${(size / 1024).toFixed(0)}KB)`);
-      succeeded.push(result.value.path);
-    } else {
-      const error = result.status === "fulfilled" ? result.value.error : (result.reason as Error).message;
-      const filePath = result.status === "fulfilled" ? result.value.path : "unknown";
-      console.error(`  ✗ ${path.basename(filePath)}: ${error}`);
-      failed.push(path.basename(filePath));
+  for (const spec of specs) {
+    try {
+      const imageInfo = validateGeneratedPng(spec.path, size);
+      console.error(`  ✓ ${path.basename(spec.path)} (${(imageInfo.bytes / 1024).toFixed(0)}KB, ${imageInfo.width}x${imageInfo.height})`);
+      succeeded.push(spec.path);
+    } catch (error: any) {
+      console.error(`  ✗ ${path.basename(spec.path)}: ${error.message}`);
+      failed.push(path.basename(spec.path));
     }
+  }
+
+  if (failed.length > 0) {
+    throw new Error(`Variant generation failed for ${failed.length}/${count} files. Log: ${logPath}`);
   }
 
   console.error(`\n${succeeded.length}/${count} variants generated (${elapsed}s)`);
@@ -177,6 +122,8 @@ export async function variants(options: VariantsOptions): Promise<void> {
     failed: failed.length,
     paths: succeeded,
     errors: failed,
+    logPath,
+    codexStatus,
   }, null, 2));
 }
 
@@ -187,7 +134,6 @@ const VIEWPORT_CONFIGS: Record<string, { size: string; suffix: string; desc: str
 };
 
 async function generateResponsiveVariants(
-  apiKey: string,
   baseBrief: string,
   outputDir: string,
   viewports: string,
@@ -203,37 +149,59 @@ async function generateResponsiveVariants(
 
   console.error(`Generating responsive variants: ${configs.map(c => c.desc).join(", ")}...`);
   const startTime = Date.now();
+  const logPath = resolveLogPath("variants-responsive");
+  const specs = configs.map((config) => ({
+    config,
+    path: path.join(outputDir, `responsive-${config.suffix}.png`),
+  }));
 
-  const promises = configs.map((config, i) => {
-    const prompt = `${baseBrief}\n\nViewport: ${config.desc}. Adapt the layout for this screen size. ${
-      config.suffix === "mobile" ? "Use a single-column layout, larger touch targets, and mobile navigation patterns." :
-      config.suffix === "tablet" ? "Use a responsive layout that works for medium screens." :
-      ""
-    }`;
-    const outputPath = path.join(outputDir, `responsive-${config.suffix}.png`);
-    const delay = i * 1500;
-
-    return new Promise<{ path: string; success: boolean; error?: string }>(resolve =>
-      setTimeout(resolve, delay)
-    ).then(() => {
-      console.error(`  Starting ${config.desc}...`);
-      return generateVariant(apiKey, prompt, outputPath, config.size, quality);
-    });
+  const codexStatus = await runCodexJson<ImageTaskResponse>({
+    prompt: [
+      "Create responsive UI mockup variants for the same brief.",
+      "",
+      `Base brief: ${baseBrief}`,
+      ...imageModelGuardrails(path.join(outputDir, "responsive-desktop.png"), "1536x1024", quality),
+      "",
+      "Write PNG files exactly to these paths:",
+      ...specs.map(({ config, path: outputPath }) => {
+        const extra = config.suffix === "mobile"
+          ? "Use a single-column layout, larger touch targets, and mobile navigation patterns."
+          : config.suffix === "tablet"
+            ? "Use a responsive layout that works for medium screens."
+            : "Use a desktop-appropriate layout.";
+        return `- ${path.resolve(outputPath)} — ${config.desc}. ${extra}`;
+      }),
+      "",
+      "Adapt the same product to each viewport while preserving visual consistency across the set.",
+      "Apply the native image-generation requirement to every requested viewport file.",
+      '- Return JSON only.',
+      '- If you successfully create and write all requested PNGs, return: {"status":"ok","writtenFiles":["absolute-path-1","absolute-path-2"],"generationMethod":"native_image_generation","notes":""}.',
+      '- If native image generation or direct file writing is unavailable, return: {"status":"unavailable","writtenFiles":[],"generationMethod":"unavailable","notes":"explain why"}.',
+      '- Do not claim success if every requested file was not actually written.',
+    ].join("\n"),
+    logPath,
+    outputSchema: buildImageTaskSchema(specs.length),
+    writablePaths: specs.map((spec) => spec.path),
+    timeoutMs: 8 * 60_000,
   });
 
-  const results = await Promise.allSettled(promises);
+  validateImageTaskResponse(codexStatus, specs.map((spec) => spec.path));
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
   const succeeded: string[] = [];
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value.success) {
-      const sz = fs.statSync(result.value.path).size;
-      console.error(`  ✓ ${path.basename(result.value.path)} (${(sz / 1024).toFixed(0)}KB)`);
-      succeeded.push(result.value.path);
-    } else {
-      const error = result.status === "fulfilled" ? result.value.error : (result.reason as Error).message;
-      console.error(`  ✗ ${error}`);
+  for (const spec of specs) {
+    try {
+      const imageInfo = validateGeneratedPng(spec.path, spec.config.size);
+      console.error(`  ✓ ${path.basename(spec.path)} (${(imageInfo.bytes / 1024).toFixed(0)}KB, ${imageInfo.width}x${imageInfo.height})`);
+      succeeded.push(spec.path);
+    } catch (error: any) {
+      console.error(`  ✗ ${path.basename(spec.path)}: ${error.message}`);
     }
+  }
+
+  if (succeeded.length !== configs.length) {
+    throw new Error(`Responsive variant generation failed for ${configs.length - succeeded.length}/${configs.length} files. Log: ${logPath}`);
   }
 
   console.error(`\n${succeeded.length}/${configs.length} responsive variants generated (${elapsed}s)`);
@@ -242,5 +210,7 @@ async function generateResponsiveVariants(
     viewports: viewportList,
     succeeded: succeeded.length,
     paths: succeeded,
+    logPath,
+    codexStatus,
   }, null, 2));
 }

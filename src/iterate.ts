@@ -1,14 +1,13 @@
 /**
- * Multi-turn design iteration using OpenAI Responses API.
- *
- * Primary: uses previous_response_id for conversational threading.
- * Fallback: if threading doesn't retain visual context, re-generates
- * with original brief + accumulated feedback in a single prompt.
+ * Multi-turn design iteration using Codex.
  */
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey } from "./auth";
+import { requireCodexAuth } from "./auth";
+import { imageModelGuardrails, runCodexJson } from "./codex";
+import { buildImageTaskSchema, type ImageTaskResponse, validateGeneratedPng, validateImageTaskResponse } from "./image-task";
+import { resolveLogPath } from "./project-dir";
 import { readSession, updateSession } from "./session";
 
 export interface IterateOptions {
@@ -21,7 +20,7 @@ export interface IterateOptions {
  * Iterate on an existing design using session state.
  */
 export async function iterate(options: IterateOptions): Promise<void> {
-  const apiKey = requireApiKey();
+  requireCodexAuth();
   const session = readSession(options.session);
 
   console.error(`Iterating on session ${session.id}...`);
@@ -29,133 +28,55 @@ export async function iterate(options: IterateOptions): Promise<void> {
   console.error(`  Feedback: "${options.feedback}"`);
 
   const startTime = Date.now();
+  const accumulatedPrompt = buildAccumulatedPrompt(
+    session.originalBrief,
+    [...session.feedbackHistory, options.feedback]
+  );
+  const referenceImage = [...session.outputPaths].reverse().find((value) => fs.existsSync(value));
+  const logPath = resolveLogPath("iterate");
+  const outputSize = "1536x1024";
 
-  // Try multi-turn with previous_response_id first
-  let success = false;
-  let responseId = "";
+  fs.mkdirSync(path.dirname(options.output), { recursive: true });
 
-  try {
-    const result = await callWithThreading(apiKey, session.lastResponseId, options.feedback);
-    responseId = result.responseId;
+  const codexStatus = await runCodexJson<ImageTaskResponse>({
+    prompt: [
+      "Refine the attached UI mockup using the feedback below.",
+      ...imageModelGuardrails(options.output, outputSize, "high"),
+      "",
+      accumulatedPrompt,
+      "",
+      "Use the attached image as the current design baseline.",
+      "Preserve the overall product context while applying all requested changes.",
+      '- Return JSON only.',
+      '- If you successfully create and write the PNG, return: {"status":"ok","writtenFiles":["absolute-path"],"generationMethod":"native_image_generation","notes":""}.',
+      '- If native image generation or direct file writing is unavailable, return: {"status":"unavailable","writtenFiles":[],"generationMethod":"unavailable","notes":"explain why"}.',
+      '- Do not claim success if the file was not actually written.',
+    ].join("\n"),
+    images: referenceImage ? [referenceImage] : [],
+    logPath,
+    outputSchema: buildImageTaskSchema(1),
+    writablePaths: [options.output],
+    timeoutMs: 5 * 60_000,
+  });
 
-    fs.mkdirSync(path.dirname(options.output), { recursive: true });
-    fs.writeFileSync(options.output, Buffer.from(result.imageData, "base64"));
-    success = true;
-  } catch (err: any) {
-    console.error(`  Threading failed: ${err.message}`);
-    console.error("  Falling back to re-generation with accumulated feedback...");
+  validateImageTaskResponse(codexStatus, [options.output]);
+  const imageInfo = validateGeneratedPng(options.output, outputSize);
 
-    // Fallback: re-generate with original brief + all feedback
-    const accumulatedPrompt = buildAccumulatedPrompt(
-      session.originalBrief,
-      [...session.feedbackHistory, options.feedback]
-    );
+  const responseId = `codex-${Date.now()}`;
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.error(`Generated (${elapsed}s, ${(imageInfo.bytes / 1024).toFixed(0)}KB, ${imageInfo.width}x${imageInfo.height}) → ${options.output}`);
 
-    const result = await callFresh(apiKey, accumulatedPrompt);
-    responseId = result.responseId;
+  // Update session
+  updateSession(session, responseId, options.feedback, options.output);
 
-    fs.mkdirSync(path.dirname(options.output), { recursive: true });
-    fs.writeFileSync(options.output, Buffer.from(result.imageData, "base64"));
-    success = true;
-  }
-
-  if (success) {
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const size = fs.statSync(options.output).size;
-    console.error(`Generated (${elapsed}s, ${(size / 1024).toFixed(0)}KB) → ${options.output}`);
-
-    // Update session
-    updateSession(session, responseId, options.feedback, options.output);
-
-    console.log(JSON.stringify({
-      outputPath: options.output,
-      sessionFile: options.session,
-      responseId,
-      iteration: session.feedbackHistory.length + 1,
-    }, null, 2));
-  }
-}
-
-async function callWithThreading(
-  apiKey: string,
-  previousResponseId: string,
-  feedback: string,
-): Promise<{ responseId: string; imageData: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        input: `Based on the previous design, make these changes: ${feedback}`,
-        previous_response_id: previousResponseId,
-        tools: [{ type: "image_generation", size: "1536x1024", quality: "high" }],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API error (${response.status}): ${error.slice(0, 300)}`);
-    }
-
-    const data = await response.json() as any;
-    const imageItem = data.output?.find((item: any) => item.type === "image_generation_call");
-
-    if (!imageItem?.result) {
-      throw new Error("No image data in threaded response");
-    }
-
-    return { responseId: data.id, imageData: imageItem.result };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function callFresh(
-  apiKey: string,
-  prompt: string,
-): Promise<{ responseId: string; imageData: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        input: prompt,
-        tools: [{ type: "image_generation", size: "1536x1024", quality: "high" }],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API error (${response.status}): ${error.slice(0, 300)}`);
-    }
-
-    const data = await response.json() as any;
-    const imageItem = data.output?.find((item: any) => item.type === "image_generation_call");
-
-    if (!imageItem?.result) {
-      throw new Error("No image data in fresh response");
-    }
-
-    return { responseId: data.id, imageData: imageItem.result };
-  } finally {
-    clearTimeout(timeout);
-  }
+  console.log(JSON.stringify({
+    outputPath: options.output,
+    sessionFile: options.session,
+    responseId,
+    iteration: session.feedbackHistory.length + 1,
+    logPath,
+    codexStatus,
+  }, null, 2));
 }
 
 function buildAccumulatedPrompt(originalBrief: string, feedback: string[]): string {

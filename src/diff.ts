@@ -1,17 +1,42 @@
 /**
- * Visual diff between two mockups using GPT-4o vision.
+ * Visual diff between two mockups using Codex.
  * Identifies what changed between design iterations or between
  * an approved mockup and the live implementation.
  */
 
-import fs from "fs";
-import { requireApiKey } from "./auth";
+import { requireCodexAuth } from "./auth";
+import { runCodexJson } from "./codex";
+import { resolveLogPath } from "./project-dir";
 
 export interface DiffResult {
   differences: { area: string; description: string; severity: string }[];
   summary: string;
   matchScore: number; // 0-100, how closely they match
+  logPath?: string;
 }
+
+const DIFF_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    differences: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          area: { type: "string" },
+          description: { type: "string" },
+          severity: { type: "string", enum: ["high", "medium", "low"] },
+        },
+        required: ["area", "description", "severity"],
+      },
+    },
+    summary: { type: "string" },
+    matchScore: { type: "number" },
+  },
+  required: ["differences", "summary", "matchScore"],
+};
 
 /**
  * Compare two images and describe the visual differences.
@@ -20,69 +45,31 @@ export async function diffMockups(
   beforePath: string,
   afterPath: string,
 ): Promise<DiffResult> {
-  const apiKey = requireApiKey();
-  const beforeData = fs.readFileSync(beforePath).toString("base64");
-  const afterData = fs.readFileSync(afterPath).toString("base64");
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
+  requireCodexAuth();
+  const logPath = resolveLogPath("diff");
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Compare these two UI images. The first is the BEFORE (or design intent), the second is the AFTER (or actual implementation). Return valid JSON only:
-
-{
-  "differences": [
-    {"area": "header", "description": "Font size changed from ~32px to ~24px", "severity": "high"},
-    ...
-  ],
-  "summary": "one sentence overall assessment",
-  "matchScore": 85
-}
-
-severity: "high" = noticeable to any user, "medium" = visible on close inspection, "low" = minor/pixel-level.
-matchScore: 100 = identical, 0 = completely different.
-Focus on layout, typography, colors, spacing, and element presence/absence. Ignore rendering differences (anti-aliasing, sub-pixel).`,
-            },
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${beforeData}` },
-            },
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${afterData}` },
-            },
-          ],
-        }],
-        max_tokens: 600,
-        response_format: { type: "json_object" },
-      }),
-      signal: controller.signal,
+    const result = await runCodexJson<DiffResult>({
+      images: [beforePath, afterPath],
+      logPath,
+      outputSchema: DIFF_SCHEMA,
+      timeoutMs: 90_000,
+      prompt: [
+        "Compare the two attached UI images.",
+        "The first image is BEFORE or design intent. The second image is AFTER or actual implementation.",
+        "Return JSON only.",
+        "",
+        "Rules:",
+        "- `severity`: high means obvious to any user, medium means visible on inspection, low means minor or pixel-level.",
+        "- `matchScore`: 100 means identical, 0 means completely different.",
+        "- Focus on layout, typography, colors, spacing, and missing or extra elements.",
+        "- Ignore anti-aliasing and other tiny rendering differences.",
+      ].join("\n"),
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`Diff API error (${response.status}): ${error.slice(0, 200)}`);
-      return { differences: [], summary: "Diff unavailable", matchScore: -1 };
-    }
-
-    const data = await response.json() as any;
-    const content = data.choices?.[0]?.message?.content?.trim() || "";
-    return JSON.parse(content) as DiffResult;
-  } finally {
-    clearTimeout(timeout);
+    return { ...result, logPath };
+  } catch (error: any) {
+    console.error(`Diff failed: ${error.message}`);
+    return { differences: [], summary: "Diff unavailable", matchScore: -1, logPath };
   }
 }
 

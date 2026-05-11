@@ -80,3 +80,12 @@ export function resolveOutputDir(explicit: string | undefined, defaultSubdir: st
   const dir = ensureDesignDir();
   return path.join(dir, defaultSubdir);
 }
+
+/**
+ * Resolve a persistent log file path inside .design/logs/.
+ */
+export function resolveLogPath(name: string): string {
+  const dir = path.join(ensureDesignDir(), "logs");
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${name}-${Date.now()}.log`);
+}

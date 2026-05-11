@@ -7,7 +7,10 @@
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey } from "./auth";
+import { requireCodexAuth } from "./auth";
+import { imageModelGuardrails, runCodexJson } from "./codex";
+import { buildImageTaskSchema, type ImageTaskResponse, validateGeneratedPng, validateImageTaskResponse } from "./image-task";
+import { resolveLogPath } from "./project-dir";
 
 export interface EvolveOptions {
   screenshot: string;  // Path to current site screenshot
@@ -17,128 +20,50 @@ export interface EvolveOptions {
 
 /**
  * Generate an evolved mockup from an existing screenshot + brief.
- * Sends the screenshot as context to GPT-4o with image generation,
- * asking it to produce a new version incorporating the brief's changes.
+ * Sends the screenshot as context to Codex, asking it to produce a new
+ * version incorporating the brief's changes.
  */
 export async function evolve(options: EvolveOptions): Promise<void> {
-  const apiKey = requireApiKey();
-  const screenshotData = fs.readFileSync(options.screenshot).toString("base64");
+  requireCodexAuth();
 
   console.error(`Evolving ${options.screenshot} with: "${options.brief}"`);
   const startTime = Date.now();
+  fs.mkdirSync(path.dirname(options.output), { recursive: true });
+  const logPath = resolveLogPath("evolve");
+  const outputSize = "1536x1024";
 
-  // Use the Responses API with both a text prompt referencing the screenshot
-  // and the image_generation tool to produce the evolved version.
-  // Since we can't send reference images directly to image_generation,
-  // we describe the current state in detail first via vision, then generate.
+  const codexStatus = await runCodexJson<ImageTaskResponse>({
+    prompt: [
+      "Create an evolved UI mockup based on the attached screenshot.",
+      ...imageModelGuardrails(options.output, outputSize, "high"),
+      "",
+      "Requested changes:",
+      options.brief,
+      "",
+      "Preserve the core product context from the screenshot while applying the requested design changes.",
+      "The result should look like a real production UI, not a wireframe.",
+      '- Return JSON only.',
+      '- If you successfully create and write the PNG, return: {"status":"ok","writtenFiles":["absolute-path"],"generationMethod":"native_image_generation","notes":""}.',
+      '- If native image generation or direct file writing is unavailable, return: {"status":"unavailable","writtenFiles":[],"generationMethod":"unavailable","notes":"explain why"}.',
+      '- Do not claim success if the file was not actually written.',
+    ].join("\n"),
+    images: [options.screenshot],
+    logPath,
+    outputSchema: buildImageTaskSchema(1),
+    writablePaths: [options.output],
+    timeoutMs: 5 * 60_000,
+  });
 
-  // Step 1: Analyze current screenshot
-  const analysis = await analyzeScreenshot(apiKey, screenshotData);
-  console.error(`  Analyzed current design: ${analysis.slice(0, 100)}...`);
+  validateImageTaskResponse(codexStatus, [options.output]);
+  const imageInfo = validateGeneratedPng(options.output, outputSize);
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.error(`Generated (${elapsed}s, ${(imageInfo.bytes / 1024).toFixed(0)}KB, ${imageInfo.width}x${imageInfo.height}) → ${options.output}`);
 
-  // Step 2: Generate evolved version using analysis + brief
-  const evolvedPrompt = [
-    "Generate a pixel-perfect UI mockup that is an improved version of an existing design.",
-    "",
-    "CURRENT DESIGN (what exists now):",
-    analysis,
-    "",
-    "REQUESTED CHANGES:",
-    options.brief,
-    "",
-    "Generate a new mockup that keeps the existing layout structure but applies the requested changes.",
-    "The result should look like a real production UI. All text must be readable.",
-    "1536x1024 pixels.",
-  ].join("\n");
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        input: evolvedPrompt,
-        tools: [{ type: "image_generation", size: "1536x1024", quality: "high" }],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API error (${response.status}): ${error.slice(0, 300)}`);
-    }
-
-    const data = await response.json() as any;
-    const imageItem = data.output?.find((item: any) => item.type === "image_generation_call");
-
-    if (!imageItem?.result) {
-      throw new Error("No image data in response");
-    }
-
-    fs.mkdirSync(path.dirname(options.output), { recursive: true });
-    const imageBuffer = Buffer.from(imageItem.result, "base64");
-    fs.writeFileSync(options.output, imageBuffer);
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.error(`Generated (${elapsed}s, ${(imageBuffer.length / 1024).toFixed(0)}KB) → ${options.output}`);
-
-    console.log(JSON.stringify({
-      outputPath: options.output,
-      sourceScreenshot: options.screenshot,
-      brief: options.brief,
-    }, null, 2));
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-/**
- * Analyze a screenshot to produce a detailed description for re-generation.
- */
-async function analyzeScreenshot(apiKey: string, imageBase64: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${imageBase64}` },
-            },
-            {
-              type: "text",
-              text: `Describe this UI in detail for re-creation. Include: overall layout structure, color scheme (hex values), typography (sizes, weights), specific text content visible, spacing between elements, alignment patterns, and any decorative elements. Be precise enough that someone could recreate this UI from your description alone. 200 words max.`,
-            },
-          ],
-        }],
-        max_tokens: 400,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      return "Unable to analyze screenshot";
-    }
-
-    const data = await response.json() as any;
-    return data.choices?.[0]?.message?.content?.trim() || "Unable to analyze screenshot";
-  } finally {
-    clearTimeout(timeout);
-  }
+  console.log(JSON.stringify({
+    outputPath: options.output,
+    sourceScreenshot: options.screenshot,
+    brief: options.brief,
+    logPath,
+    codexStatus,
+  }, null, 2));
 }

@@ -2,13 +2,13 @@
  * design CLI — stateless CLI for AI-powered design generation.
  *
  * Unlike the browse binary (persistent Chromium daemon), the design binary
- * is stateless: each invocation makes API calls and writes files. Session
+ * is stateless: each invocation shells out to Codex and writes files. Session
  * state for multi-turn iteration is a JSON file in /tmp.
  *
  * Flow:
  *   1. Parse command + flags from argv
- *   2. Resolve auth (~/.config/design/config.json → OPENAI_API_KEY → guided setup)
- *   3. Execute command (API call → write PNG/HTML)
+ *   2. Resolve Codex login state
+ *   3. Execute command (Codex run or local file operation)
  *   4. Print result JSON to stdout
  */
 
@@ -18,7 +18,7 @@ import { checkCommand } from "./check";
 import { compare } from "./compare";
 import { variants } from "./variants";
 import { iterate } from "./iterate";
-import { resolveApiKey, saveApiKey } from "./auth";
+import { getCodexStatus } from "./auth";
 import { extractDesignLanguage, updateDesignMd } from "./memory";
 import { diffMockups, verifyAgainstMockup } from "./diff";
 import { evolve } from "./evolve";
@@ -26,6 +26,8 @@ import { generateDesignToCodePrompt } from "./design-to-code";
 import { serve } from "./serve";
 import { gallery } from "./gallery";
 import { resolveOutput, resolveOutputDir, ensureDesignDir } from "./project-dir";
+import path from "path";
+import fs from "fs";
 
 function parseArgs(argv: string[]): { command: string; flags: Record<string, string | boolean> } {
   const args = argv.slice(2); // skip bun/node and script path
@@ -61,34 +63,32 @@ function printUsage(): void {
     console.log(`  ${name.padEnd(12)} ${info.description}`);
     console.log(`  ${"".padEnd(12)} ${info.usage}`);
   }
-  console.log("\nAuth: ~/.config/design/config.json or OPENAI_API_KEY env var");
+  console.log("\nBackend: codex exec");
+  console.log("Auth: codex login");
   console.log("Setup: design setup");
 }
 
 async function runSetup(): Promise<void> {
-  const existing = resolveApiKey();
-  if (existing) {
-    console.log("Existing API key found. Running smoke test...");
-  } else {
-    console.log("No API key found. Please enter your OpenAI API key.");
-    console.log("Get one at: https://platform.openai.com/api-keys");
-    console.log("(Needs image generation permissions)\n");
+  console.log("design setup — verify Codex backend\n");
 
-    // Read from stdin
-    process.stdout.write("API key: ");
-    const reader = Bun.stdin.stream().getReader();
-    const { value } = await reader.read();
-    reader.releaseLock();
-    const key = new TextDecoder().decode(value).trim();
-
-    if (!key || !key.startsWith("sk-")) {
-      console.error("Invalid key. Must start with 'sk-'.");
-      process.exit(1);
-    }
-
-    saveApiKey(key);
-    console.log("Key saved to ~/.config/design/config.json (0600 permissions).");
+  const status = getCodexStatus();
+  if (!status.available) {
+    console.error("Codex CLI not found.");
+    console.error("Install Codex and ensure `codex` is on your PATH.");
+    console.error(status.message);
+    process.exit(1);
   }
+
+  if (!status.loggedIn) {
+    console.error("Codex is installed but not logged in.");
+    console.error("Run: codex login");
+    if (status.message) {
+      console.error(status.message);
+    }
+    process.exit(1);
+  }
+
+  console.log(status.message);
 
   // Smoke test
   console.log("\nRunning smoke test (generating a simple image)...");
@@ -102,7 +102,7 @@ async function runSetup(): Promise<void> {
     console.log("\nSmoke test PASSED. Design generation is working.");
   } catch (err: any) {
     console.error(`\nSmoke test FAILED: ${err.message}`);
-    console.error("Check your API key and organization verification status.");
+    console.error("Check your Codex login state and Codex image-generation capabilities.");
     process.exit(1);
   }
 }
@@ -279,18 +279,43 @@ async function resolveImagePaths(input: string): Promise<string[]> {
 
   // Check if it's a glob pattern
   if (input.includes("*")) {
-    const glob = new Bun.Glob(input);
+    const absoluteInput = path.isAbsolute(input) ? input : path.resolve(input);
+    const globDir = path.dirname(absoluteInput);
+    const globPattern = path.basename(absoluteInput)
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*/g, ".*");
+    const matcher = new RegExp(`^${globPattern}$`, "i");
     const paths: string[] = [];
-    for await (const match of glob.scan({ absolute: true })) {
-      if (match.endsWith(".png") || match.endsWith(".jpg") || match.endsWith(".jpeg")) {
-        paths.push(match);
+
+    if (fs.existsSync(globDir)) {
+      for (const entry of fs.readdirSync(globDir)) {
+        if (!matcher.test(entry)) continue;
+        const match = path.join(globDir, entry);
+        if (match.endsWith(".png") || match.endsWith(".jpg") || match.endsWith(".jpeg")) {
+          paths.push(match);
+        }
       }
+    }
+
+    if (paths.length === 0) {
+      console.error(`No images matched glob: ${input}`);
+      process.exit(1);
     }
     return paths.sort();
   }
 
   // Comma-separated or single path
-  return input.split(",").map(p => p.trim());
+  const paths = input.split(",").map((p) => {
+    const trimmed = p.trim();
+    return path.isAbsolute(trimmed) ? trimmed : path.resolve(trimmed);
+  });
+
+  if (paths.length === 0) {
+    console.error(`No image paths provided: ${input}`);
+    process.exit(1);
+  }
+
+  return paths;
 }
 
 main().catch(err => {

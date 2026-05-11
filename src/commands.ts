@@ -74,7 +74,7 @@ export const COMMANDS = new Map<string, {
     flags: ["--html", "--timeout"],
   }],
   ["setup", {
-    description: "Guided API key setup + smoke test",
+    description: "Verify Codex login + run smoke test",
     usage: "setup",
     flags: [],
   }],

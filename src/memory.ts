@@ -1,7 +1,7 @@
 /**
  * Design Memory — extract visual language from approved mockups into DESIGN.md.
  *
- * After a mockup is approved, uses GPT-4o vision to extract:
+ * After a mockup is approved, uses Codex to extract:
  * - Color palette (hex values)
  * - Typography (font families, sizes, weights)
  * - Spacing patterns (padding, margins, gaps)
@@ -13,7 +13,9 @@
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey } from "./auth";
+import { requireCodexAuth } from "./auth";
+import { runCodexJson } from "./codex";
+import { resolveLogPath } from "./project-dir";
 
 export interface ExtractedDesign {
   colors: { name: string; hex: string; usage: string }[];
@@ -21,69 +23,68 @@ export interface ExtractedDesign {
   spacing: string[];
   layout: string[];
   mood: string;
+  logPath?: string;
 }
+
+const EXTRACT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    colors: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          hex: { type: "string" },
+          usage: { type: "string" },
+        },
+        required: ["name", "hex", "usage"],
+      },
+    },
+    typography: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          role: { type: "string" },
+          family: { type: "string" },
+          size: { type: "string" },
+          weight: { type: "string" },
+        },
+        required: ["role", "family", "size", "weight"],
+      },
+    },
+    spacing: { type: "array", items: { type: "string" } },
+    layout: { type: "array", items: { type: "string" } },
+    mood: { type: "string" },
+  },
+  required: ["colors", "typography", "spacing", "layout", "mood"],
+};
 
 /**
  * Extract visual language from an approved mockup PNG.
  */
 export async function extractDesignLanguage(imagePath: string): Promise<ExtractedDesign> {
-  const apiKey = requireApiKey();
-  const imageData = fs.readFileSync(imagePath).toString("base64");
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
+  requireCodexAuth();
+  const logPath = resolveLogPath("extract");
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${imageData}` },
-            },
-            {
-              type: "text",
-              text: `Analyze this UI mockup and extract the design language. Return valid JSON only, no markdown:
+    const result = await runCodexJson<ExtractedDesign>({
+      images: [imagePath],
+      logPath,
+      outputSchema: EXTRACT_SCHEMA,
+      timeoutMs: 90_000,
+      prompt: `Analyze the attached UI mockup and extract the design language as JSON only.
 
-{
-  "colors": [{"name": "primary", "hex": "#...", "usage": "buttons, links"}, ...],
-  "typography": [{"role": "heading", "family": "...", "size": "...", "weight": "..."}, ...],
-  "spacing": ["8px base unit", "16px between sections", ...],
-  "layout": ["left-aligned content", "max-width 1200px", ...],
-  "mood": "one sentence describing the overall feel"
-}
-
-Extract real values from what you see. Be specific about hex colors and font sizes.`,
-            },
-          ],
-        }],
-        max_tokens: 800,
-        response_format: { type: "json_object" },
-      }),
-      signal: controller.signal,
+Extract real values from what you see. Be specific about hex colors, font sizes, spacing rhythms, layout conventions, and the overall mood.`,
     });
-
-    if (!response.ok) {
-      console.error(`Vision extraction failed (${response.status})`);
-      return defaultDesign();
-    }
-
-    const data = await response.json() as any;
-    const content = data.choices?.[0]?.message?.content?.trim() || "";
-    return JSON.parse(content) as ExtractedDesign;
+    return { ...result, logPath };
   } catch (err: any) {
     console.error(`Design extraction error: ${err.message}`);
-    return defaultDesign();
-  } finally {
-    clearTimeout(timeout);
+    return { ...defaultDesign(), logPath };
   }
 }
 

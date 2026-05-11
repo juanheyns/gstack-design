@@ -257,7 +257,7 @@
   <!-- Hero -->
   <div class="hero">
     <h1>AI-powered<br><span>UI mockup CLI</span></h1>
-    <p>Generate, iterate, diff, and QA production-quality UI mockups from the command line. Built on GPT-4o image generation.</p>
+    <p>Generate, iterate, diff, and QA production-quality UI mockups from the command line. Model-backed commands run through <code>codex exec</code>.</p>
 
     <div class="install-box">
       <span class="prompt">$</span>
@@ -273,10 +273,14 @@
 
     <div class="badges">
       <span class="badge">macOS · Linux · Windows</span>
-      <span class="badge">GPT-4o image generation</span>
+      <span class="badge">Codex backend</span>
       <span class="badge">Zero dependencies</span>
       <span class="badge">MIT license</span>
     </div>
+  </div>
+
+  <div style="margin:1.25rem auto 0;max-width:860px;padding:0.9rem 1rem;border:1px solid var(--border);border-radius:12px;background:var(--code-bg);color:var(--muted);font-size:0.95rem;line-height:1.6">
+    The CLI keeps the same <code>design</code> commands, but model-backed work now runs through <code>codex exec</code>. See <a href="https://github.com/juanheyns/gstack-design/blob/main/docs/codex-backend.md">codex-backend.md</a>.
   </div>
 
   <!-- Install -->
@@ -286,12 +290,14 @@
     <h3>Homebrew (recommended)</h3>
     <pre><span class="cmd">brew tap juanheyns/gstack
 brew install design
-design setup</span>   <span class="comment"># configure your OpenAI API key</span></pre>
+codex login
+design setup</span>   <span class="comment"># verify Codex login + run smoke test</span></pre>
 
     <h3>Manual</h3>
     <pre><span class="comment"># Download a release binary from GitHub and put it in your PATH</span>
 <span class="cmd">curl -L https://github.com/juanheyns/gstack-design/releases/latest/download/design-darwin-arm64.tar.gz | tar xz
 mv design /usr/local/bin/
+codex login
 design setup</span></pre>
 
     <h3>Build from source</h3>
@@ -341,7 +347,7 @@ browse screenshot /tmp/current.png</span>
 <span class="cmd">design diff --before /tmp/current.png --after .design/evolved.png</span></pre>
 
     <h3>Design-to-code handoff</h3>
-    <pre><span class="cmd">design design-to-code --image .design/mockup.png</span>
+    <pre><span class="cmd">design prompt --image .design/mockup.png</span>
 <span class="comment"># Returns: { implementationPrompt, colors, typography, layout, components }</span></pre>
   </section>
 
@@ -370,7 +376,7 @@ browse screenshot /tmp/current.png</span>
     <h3>Design evolution</h3>
     <table class="cmd-table">
       <tr><td>design evolve --screenshot ... --brief "..."</td><td>Evolve a live screenshot into a new design</td></tr>
-      <tr><td>design design-to-code --image ...</td><td>Extract implementation prompt from mockup</td></tr>
+      <tr><td>design prompt --image ...</td><td>Extract implementation prompt from mockup</td></tr>
       <tr><td>design extract --image ...</td><td>Extract design language into DESIGN.md</td></tr>
     </table>
 
@@ -378,7 +384,7 @@ browse screenshot /tmp/current.png</span>
     <table class="cmd-table">
       <tr><td>design gallery</td><td>HTML timeline of all design explorations</td></tr>
       <tr><td>design serve --html board.html</td><td>Serve comparison board with feedback loop</td></tr>
-      <tr><td>design setup</td><td>Configure OpenAI API key</td></tr>
+      <tr><td>design setup</td><td>Verify Codex login + run smoke test</td></tr>
       <tr><td>design --version</td><td>Print version</td></tr>
     </table>
   </section>
@@ -396,7 +402,7 @@ browse screenshot /tmp/current.png</span>
       <span class="step">check</span> <span class="arrow">→</span>
       <span class="step">iterate</span> <span class="arrow">→</span>
       <span class="step">compare</span> <span class="arrow">→</span>
-      <span class="step">design-to-code</span> <span class="arrow">→</span>
+      <span class="step">prompt</span> <span class="arrow">→</span>
       <span class="step">implement</span>
     </div>
 
@@ -430,10 +436,9 @@ browse screenshot /tmp/current.png</span>
 }</pre>
 
     <h3>Configuration</h3>
-    <pre><span class="cmd">design setup</span>                    <span class="comment"># interactive API key setup</span>
-<span class="cmd">export OPENAI_API_KEY=sk-...</span>    <span class="comment"># or set via environment variable</span>
-<span class="comment"># Config stored at ~/.config/design/config.json</span>
-<span class="comment"># Also reads ~/.gstack/openai.json as fallback for gstack users</span></pre>
+    <pre><span class="cmd">codex login</span>
+<span class="cmd">design setup</span>                    <span class="comment"># verify Codex login + run smoke test</span>
+<span class="comment"># Model-backed commands run through codex exec</span></pre>
   </section>
 
 </main>
