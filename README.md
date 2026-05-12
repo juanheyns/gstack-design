@@ -1,6 +1,6 @@
 # design
 
-AI-powered UI mockup CLI built on GPT-4o. Generate, iterate, diff, and QA production-quality UI mockups from the command line.
+AI-powered UI mockup CLI. Generate, iterate, diff, and QA production-quality UI mockups from the command line. Pluggable providers — bring your own OpenAI **or** Gemini key.
 
 ## Install
 
@@ -11,7 +11,7 @@ brew install juanheyns/tap/design
 ## Quick start
 
 ```bash
-design setup                    # Configure your OpenAI API key
+design setup                    # Configure your API key (OpenAI or Gemini)
 design generate --brief "Dashboard with metrics cards and a sidebar" --output mockup.png
 design check --image mockup.png --brief "Dashboard with metrics cards and a sidebar"
 ```
@@ -46,11 +46,15 @@ Requires [bun](https://bun.sh) >= 1.0.0.
 ## Configuration
 
 ```bash
-design setup                    # Interactive API key setup
-export OPENAI_API_KEY=sk-...    # Or set via environment variable
+design setup                          # Interactive: pick OpenAI or Gemini, enter key
+export OPENAI_API_KEY=sk-...          # OpenAI via env var
+export GEMINI_API_KEY=AIza...         # Or Gemini via env var
+export DESIGN_PROVIDER=gemini         # When both keys are set, force one
 ```
 
 Config is stored at `~/.config/design/config.json`. Generated output defaults to `.design/` in the project root.
+
+See [docs/providers.md](./docs/providers.md) for the full provider matrix (image edit, session threading, JSON mode).
 
 ## Agent integration
 

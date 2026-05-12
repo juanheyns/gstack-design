@@ -1,7 +1,7 @@
 /**
  * Design Memory — extract visual language from approved mockups into DESIGN.md.
  *
- * After a mockup is approved, uses GPT-4o vision to extract:
+ * After a mockup is approved, uses the configured vision provider to extract:
  * - Color palette (hex values)
  * - Typography (font families, sizes, weights)
  * - Spacing patterns (padding, margins, gaps)
@@ -13,7 +13,7 @@
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey } from "./auth";
+import { getProvider } from "./providers";
 
 export interface ExtractedDesign {
   colors: { name: string; hex: string; usage: string }[];
@@ -23,67 +23,36 @@ export interface ExtractedDesign {
   mood: string;
 }
 
+const EXTRACT_PROMPT = `Analyze this UI mockup and extract the design language. Return valid JSON only, no markdown:
+
+{
+  "colors": [{"name": "primary", "hex": "#...", "usage": "buttons, links"}],
+  "typography": [{"role": "heading", "family": "...", "size": "...", "weight": "..."}],
+  "spacing": ["8px base unit", "16px between sections"],
+  "layout": ["left-aligned content", "max-width 1200px"],
+  "mood": "one sentence describing the overall feel"
+}
+
+Extract real values from what you see. Be specific about hex colors and font sizes.`;
+
 /**
  * Extract visual language from an approved mockup PNG.
  */
 export async function extractDesignLanguage(imagePath: string): Promise<ExtractedDesign> {
-  const apiKey = requireApiKey();
+  const provider = getProvider();
   const imageData = fs.readFileSync(imagePath).toString("base64");
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
-
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${imageData}` },
-            },
-            {
-              type: "text",
-              text: `Analyze this UI mockup and extract the design language. Return valid JSON only, no markdown:
-
-{
-  "colors": [{"name": "primary", "hex": "#...", "usage": "buttons, links"}, ...],
-  "typography": [{"role": "heading", "family": "...", "size": "...", "weight": "..."}, ...],
-  "spacing": ["8px base unit", "16px between sections", ...],
-  "layout": ["left-aligned content", "max-width 1200px", ...],
-  "mood": "one sentence describing the overall feel"
-}
-
-Extract real values from what you see. Be specific about hex colors and font sizes.`,
-            },
-          ],
-        }],
-        max_tokens: 800,
-        response_format: { type: "json_object" },
-      }),
-      signal: controller.signal,
+    const content = await provider.analyze({
+      images: [imageData],
+      prompt: EXTRACT_PROMPT,
+      jsonMode: true,
+      maxTokens: 800,
     });
-
-    if (!response.ok) {
-      console.error(`Vision extraction failed (${response.status})`);
-      return defaultDesign();
-    }
-
-    const data = await response.json() as any;
-    const content = data.choices?.[0]?.message?.content?.trim() || "";
     return JSON.parse(content) as ExtractedDesign;
   } catch (err: any) {
     console.error(`Design extraction error: ${err.message}`);
     return defaultDesign();
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -113,10 +82,8 @@ export function updateDesignMd(
   const section = formatExtractedSection(extracted, sourceMockup, timestamp);
 
   if (fs.existsSync(designPath)) {
-    // Append to existing DESIGN.md
     const existing = fs.readFileSync(designPath, "utf-8");
 
-    // Check if there's already an extracted section, replace it
     const marker = "## Extracted Design Language";
     if (existing.includes(marker)) {
       const before = existing.split(marker)[0];
@@ -126,10 +93,7 @@ export function updateDesignMd(
     }
     console.error(`Updated DESIGN.md with extracted design language`);
   } else {
-    // Create new DESIGN.md
-    const content = `# Design System
-
-${section}`;
+    const content = `# Design System\n\n${section}`;
     fs.writeFileSync(designPath, content);
     console.error(`Created DESIGN.md with extracted design language`);
   }
@@ -197,6 +161,5 @@ export function readDesignConstraints(repoRoot: string): string | null {
   if (!fs.existsSync(designPath)) return null;
 
   const content = fs.readFileSync(designPath, "utf-8");
-  // Truncate to first 2000 chars to keep brief reasonable
   return content.slice(0, 2000);
 }

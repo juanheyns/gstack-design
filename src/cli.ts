@@ -18,7 +18,7 @@ import { checkCommand } from "./check";
 import { compare } from "./compare";
 import { variants } from "./variants";
 import { iterate } from "./iterate";
-import { resolveApiKey, saveApiKey } from "./auth";
+import { resolveProviderConfig, saveConfig, type ProviderName } from "./auth";
 import { extractDesignLanguage, updateDesignMd } from "./memory";
 import { diffMockups, verifyAgainstMockup } from "./diff";
 import { evolve } from "./evolve";
@@ -61,33 +61,45 @@ function printUsage(): void {
     console.log(`  ${name.padEnd(12)} ${info.description}`);
     console.log(`  ${"".padEnd(12)} ${info.usage}`);
   }
-  console.log("\nAuth: ~/.config/design/config.json or OPENAI_API_KEY env var");
+  console.log("\nAuth: ~/.config/design/config.json or OPENAI_API_KEY / GEMINI_API_KEY env var");
   console.log("Setup: design setup");
 }
 
+async function readLine(prompt: string): Promise<string> {
+  process.stdout.write(prompt);
+  const reader = Bun.stdin.stream().getReader();
+  const { value } = await reader.read();
+  reader.releaseLock();
+  return new TextDecoder().decode(value).trim();
+}
+
 async function runSetup(): Promise<void> {
-  const existing = resolveApiKey();
+  const existing = resolveProviderConfig();
   if (existing) {
-    console.log("Existing API key found. Running smoke test...");
+    console.log(`Existing ${existing.provider} key found. Running smoke test...`);
   } else {
-    console.log("No API key found. Please enter your OpenAI API key.");
-    console.log("Get one at: https://platform.openai.com/api-keys");
-    console.log("(Needs image generation permissions)\n");
+    console.log("No API key found. Pick a provider:");
+    console.log("  1) OpenAI (gpt-4o) — https://platform.openai.com/api-keys");
+    console.log("  2) Gemini (gemini-2.5-flash-image) — https://aistudio.google.com/apikey");
+    console.log("");
 
-    // Read from stdin
-    process.stdout.write("API key: ");
-    const reader = Bun.stdin.stream().getReader();
-    const { value } = await reader.read();
-    reader.releaseLock();
-    const key = new TextDecoder().decode(value).trim();
+    const choice = (await readLine("Provider [1/2]: ")).trim();
+    const provider: ProviderName = choice === "2" || choice.toLowerCase() === "gemini"
+      ? "gemini"
+      : "openai";
 
-    if (!key || !key.startsWith("sk-")) {
-      console.error("Invalid key. Must start with 'sk-'.");
+    const key = await readLine("API key: ");
+    if (!key) {
+      console.error("No key entered.");
+      process.exit(1);
+    }
+    if (provider === "openai" && !key.startsWith("sk-")) {
+      console.error("OpenAI keys start with 'sk-'.");
       process.exit(1);
     }
 
-    saveApiKey(key);
-    console.log("Key saved to ~/.config/design/config.json (0600 permissions).");
+    saveConfig({ provider, apiKey: key });
+    console.log(`Key saved to ~/.config/design/config.json (0600 permissions, provider=${provider}).`);
   }
 
   // Smoke test
